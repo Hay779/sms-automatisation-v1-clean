@@ -51,7 +51,7 @@ const getSupabase = () => {
     console.log("✅ Supabase initialisé:", supabaseUrl);
     supabaseInstance = createClient(supabaseUrl, supabaseKey, {
         auth: {
-            persistSession: false // On gère nous-mêmes les sessions
+            persistSession: false
         }
     });
     return supabaseInstance;
@@ -65,12 +65,6 @@ export const ApiService = {
   
   // ============ AUTHENTIFICATION ============
   
-  /**
-   * ✅ CONNEXION AMÉLIORÉE
-   * - Vérifie d'abord les admins
-   * - Puis les companies
-   * - Accepte les comptes actifs ET pending_verification (pour tests)
-   */
   login: async (email: string, pass: string) => {
     const supabase = getSupabase();
     const emailLower = email.toLowerCase().trim();
@@ -78,7 +72,6 @@ export const ApiService = {
     console.log(`[LOGIN] Tentative de connexion: ${emailLower}`);
 
     try {
-      // 1. Vérifier dans la table ADMINS
       const { data: admin, error: adminError } = await supabase
         .from('admins')
         .select('*')
@@ -95,7 +88,6 @@ export const ApiService = {
         return { success: false, message: "Mot de passe incorrect." };
       }
 
-      // 2. Vérifier dans la table COMPANIES
       const { data: company, error: companyError } = await supabase
         .from('companies')
         .select('*')
@@ -107,20 +99,16 @@ export const ApiService = {
         return { success: false, message: "Identifiants incorrects." };
       }
       
-      // Vérifier le mot de passe
       if (company.password_hash !== pass) {
         console.log("[LOGIN] ❌ Mot de passe client incorrect");
         return { success: false, message: "Mot de passe incorrect." };
       }
 
-      // ⭐ AMÉLIORATION : Accepter les comptes actifs ET en attente de vérification
-      // Cela permet de se connecter même si le compte est créé manuellement dans Supabase
       if (company.status === 'inactive') {
         console.log("[LOGIN] ❌ Compte désactivé");
         return { success: false, message: "Compte désactivé. Contactez le support." }; 
       }
 
-      // Vérifier que les settings existent
       const { data: settings } = await supabase
         .from('settings')
         .select('id')
@@ -144,11 +132,6 @@ export const ApiService = {
     }
   },
 
-  /**
-   * ✅ INSCRIPTION AMÉLIORÉE
-   * - Crée la company
-   * - Les settings sont créés automatiquement par le trigger SQL
-   */
   register: async (companyName: string, email: string, password: string) => {
     const supabase = getSupabase();
     const emailLower = email.toLowerCase().trim();
@@ -156,7 +139,6 @@ export const ApiService = {
     console.log(`[REGISTER] Inscription: ${companyName} (${emailLower})`);
     
     try {
-      // Vérifier si l'email existe déjà dans companies
       const { data: existing } = await supabase
         .from('companies')
         .select('id')
@@ -167,7 +149,6 @@ export const ApiService = {
         return { success: false, message: "Cet email est déjà utilisé." };
       }
       
-      // Vérifier si l'email est réservé aux admins
       const { data: existingAdmin } = await supabase
         .from('admins')
         .select('id')
@@ -178,17 +159,15 @@ export const ApiService = {
         return { success: false, message: "Cet email est réservé." };
       }
 
-      // Générer un code de vérification
       const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-      // Créer la company (le trigger créera automatiquement les settings)
       const { data: newComp, error } = await supabase
         .from('companies')
         .insert([{
           name: companyName,
           email: emailLower,
           password_hash: password,
-          status: 'pending_verification', // En attente de vérification email
+          status: 'pending_verification',
           verification_code: verificationCode,
           subscription_plan: 'basic',
           credit_history: []
@@ -201,8 +180,7 @@ export const ApiService = {
         return { success: false, message: "Erreur lors de l'inscription: " + error.message };
       }
 
-      // ⭐ Vérifier que le trigger a bien créé les settings
-      await new Promise(resolve => setTimeout(resolve, 500)); // Petit délai
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       const { data: settings } = await supabase
         .from('settings')
@@ -212,13 +190,11 @@ export const ApiService = {
 
       if (!settings) {
         console.warn("[REGISTER] ⚠️ Settings non créés par le trigger, création manuelle");
-        // Créer manuellement si le trigger a échoué
         await createDefaultSettings(supabase, newComp.id, companyName, emailLower);
       }
 
       console.log(`[REGISTER] ✅ Compte créé. Code de vérification: ${verificationCode}`);
       
-      // En dev, on retourne le code pour faciliter les tests
       return { 
         success: true, 
         requireVerification: true, 
@@ -231,9 +207,6 @@ export const ApiService = {
     }
   },
 
-  /**
-   * Vérifier l'email avec le code
-   */
   verifyEmail: async (email: string, code: string) => {
     const supabase = getSupabase();
     const emailLower = email.toLowerCase().trim();
@@ -253,7 +226,6 @@ export const ApiService = {
         return { success: false, message: "Code invalide." };
       }
 
-      // Activer le compte
       await supabase
         .from('companies')
         .update({ 
@@ -271,9 +243,6 @@ export const ApiService = {
     }
   },
   
-  /**
-   * Renvoyer le code de vérification
-   */
   resendVerificationCode: async (email: string) => {
     const supabase = getSupabase();
     const emailLower = email.toLowerCase().trim();
@@ -305,10 +274,6 @@ export const ApiService = {
 
   // ============ DONNÉES ============
 
-  /**
-   * ✅ RÉCUPÉRER LES SETTINGS
-   * Crée automatiquement si manquants
-   */
   getSettings: async (companyId?: string): Promise<Settings | null> => {
     if (!companyId) return null;
     
@@ -324,7 +289,6 @@ export const ApiService = {
       if (error || !settings) {
         console.warn(`[GET_SETTINGS] Settings manquants pour ${companyId}, création...`);
         
-        // Récupérer les infos de la company
         const { data: company } = await supabase
           .from('companies')
           .select('name, email')
@@ -334,7 +298,6 @@ export const ApiService = {
         if (company) {
           await createDefaultSettings(supabase, companyId, company.name, company.email);
           
-          // Réessayer
           const { data: newSettings } = await supabase
             .from('settings')
             .select('*')
@@ -352,16 +315,13 @@ export const ApiService = {
     }
   },
 
-  /**
-   * Mettre à jour les settings
-   */
-  updateSettings: async (newSettings: Settings): Promise<Settings> => {
+  updateSettings: async (companyId: string, newSettings: Settings): Promise<Settings> => {
     const supabase = getSupabase();
     
     const { data, error } = await supabase
       .from('settings')
       .update(newSettings)
-      .eq('company_id', newSettings.company_id)
+      .eq('company_id', companyId)
       .select()
       .single();
     
@@ -369,9 +329,6 @@ export const ApiService = {
     return data;
   },
 
-  /**
-   * Récupérer les logs SMS
-   */
   getLogs: async (companyId?: string): Promise<SmsLog[]> => {
     if (!companyId) return [];
     
@@ -386,9 +343,6 @@ export const ApiService = {
     return data || [];
   },
 
-  /**
-   * Récupérer les statistiques
-   */
   getStats: async (companyId?: string) => {
     if (!companyId) return { sms_sent: 0, calls_filtered: 0, errors: 0 };
     
@@ -405,9 +359,6 @@ export const ApiService = {
     return { sms_sent, calls_filtered, errors };
   },
 
-  /**
-   * Enregistrer un log SMS
-   */
   logSms: async (log: Omit<SmsLog, 'id' | 'created_at'>) => {
     const supabase = getSupabase();
     await supabase.from('sms_logs').insert([log]);
@@ -415,9 +366,6 @@ export const ApiService = {
 
   // ============ SUPER ADMIN ============
 
-  /**
-   * Récupérer toutes les companies
-   */
   getAllCompanies: async (): Promise<Company[]> => {
     const supabase = getSupabase();
     const { data } = await supabase
@@ -431,9 +379,6 @@ export const ApiService = {
     }));
   },
 
-  /**
-   * Récupérer les stats de toutes les companies
-   */
   getAllCompaniesStats: async (): Promise<CompanyStats[]> => {
     const supabase = getSupabase();
     
@@ -478,14 +423,10 @@ export const ApiService = {
     return stats;
   },
 
-  /**
-   * Créer ou mettre à jour une company
-   */
   upsertCompany: async (company: Partial<Company>) => {
     const supabase = getSupabase();
     
     if (company.id) {
-      // Update
       const { data, error } = await supabase
         .from('companies')
         .update(company)
@@ -496,12 +437,11 @@ export const ApiService = {
       if (error) throw error;
       return data;
     } else {
-      // Insert (le trigger créera les settings)
       const { data, error } = await supabase
         .from('companies')
         .insert([{
           ...company,
-          status: company.status || 'active', // ⭐ Actif par défaut pour les créations admin
+          status: company.status || 'active',
           subscription_plan: company.subscription_plan || 'basic',
           credit_history: company.credit_history || []
         }])
@@ -513,9 +453,6 @@ export const ApiService = {
     }
   },
 
-  /**
-   * Supprimer une company
-   */
   deleteCompany: async (companyId: string) => {
     const supabase = getSupabase();
     const { error } = await supabase
@@ -526,11 +463,112 @@ export const ApiService = {
     if (error) throw error;
   },
 
+  createCompany: async (data: {
+    name: string;
+    email: string;
+    plan: 'basic' | 'pro';
+    password: string;
+    siret?: string;
+    vat_number?: string;
+    address?: string;
+    phone?: string;
+    contact_name?: string;
+    notes?: string;
+  }) => {
+    const supabase = getSupabase();
+    
+    const { data: newComp, error } = await supabase
+      .from('companies')
+      .insert([{
+        name: data.name,
+        email: data.email.toLowerCase().trim(),
+        password_hash: data.password,
+        status: 'active',
+        subscription_plan: data.plan,
+        siret: data.siret,
+        vat_number: data.vat_number,
+        address: data.address,
+        phone: data.phone,
+        contact_name: data.contact_name,
+        notes: data.notes,
+        credit_history: []
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return newComp;
+  },
+
+  getCompanyDetails: async (companyId: string) => {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+    return data;
+  },
+
+  addCredits: async (companyId: string, amount: number, price: number, reference: string) => {
+    const supabase = getSupabase();
+    
+    const { data: company } = await supabase
+      .from('companies')
+      .select('credit_history')
+      .eq('id', companyId)
+      .single();
+    
+    const newTransaction = {
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      amount_credits: amount,
+      amount_paid: price,
+      reference: reference || `CREDIT-${Date.now()}`,
+      type: 'credit'
+    };
+    
+    const updatedHistory = [...(company?.credit_history || []), newTransaction];
+    
+    await supabase
+      .from('companies')
+      .update({ credit_history: updatedHistory })
+      .eq('id', companyId);
+    
+    const { data: settings } = await supabase
+      .from('settings')
+      .select('sms_credits')
+      .eq('company_id', companyId)
+      .single();
+    
+    await supabase
+      .from('settings')
+      .update({ sms_credits: (settings?.sms_credits || 0) + amount })
+      .eq('company_id', companyId);
+  },
+
+  saveSystemConfig: async (config: SystemConfig) => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('system_config')
+      .upsert(config)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  resetAllData: async () => {
+    const supabase = getSupabase();
+    await supabase.from('form_submissions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('sms_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('companies').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  },
+
   // ============ FORMULAIRES ============
 
-  /**
-   * Soumettre un formulaire
-   */
   submitForm: async (submission: Omit<FormSubmission, 'id' | 'submitted_at'>) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -543,9 +581,6 @@ export const ApiService = {
     return data;
   },
 
-  /**
-   * Récupérer les soumissions de formulaires
-   */
   getFormSubmissions: async (companyId: string): Promise<FormSubmission[]> => {
     const supabase = getSupabase();
     const { data } = await supabase
@@ -557,9 +592,6 @@ export const ApiService = {
     return data || [];
   },
 
-  /**
-   * Mettre à jour une soumission
-   */
   updateFormSubmission: async (submissionId: string, updates: Partial<FormSubmission>) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -575,9 +607,6 @@ export const ApiService = {
 
   // ============ CONFIGURATION SYSTÈME ============
 
-  /**
-   * Récupérer la config système
-   */
   getSystemConfig: async (): Promise<SystemConfig | null> => {
     const supabase = getSupabase();
     const { data } = await supabase
@@ -588,9 +617,6 @@ export const ApiService = {
     return data;
   },
 
-  /**
-   * Mettre à jour la config système
-   */
   updateSystemConfig: async (config: SystemConfig) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
@@ -608,9 +634,6 @@ export const ApiService = {
 // FONCTIONS UTILITAIRES
 // ==========================================
 
-/**
- * Créer les settings par défaut pour une company
- */
 async function createDefaultSettings(
   supabase: SupabaseClient, 
   companyId: string, 
