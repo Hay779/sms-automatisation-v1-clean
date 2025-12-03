@@ -8,16 +8,6 @@ import {
   Settings, SmsLog, Company, CompanyStats, 
   UserRole, SystemConfig, FormSubmission 
 } from '../types';
-import { 
-  hashPassword, 
-  verifyPassword, 
-  validateEmail, 
-  validatePassword, 
-  validateCompanyName,
-  sanitizeHtml,
-  sanitizeObject,
-  checkRateLimit
-} from '../utils/security';
 
 // Environment variables helper
 const getEnv = (key: string): string => {
@@ -65,16 +55,6 @@ export const SecureApiService = {
   // ============ AUTHENTICATION ============
   
   login: async (email: string, pass: string) => {
-    // Rate limiting
-    if (!checkRateLimit(`login_${email}`, 5, 60000)) {
-      return { success: false, message: "Trop de tentatives. Réessayez dans 1 minute." };
-    }
-
-    // Validation
-    if (!validateEmail(email)) {
-      return { success: false, message: "Format d'email invalide." };
-    }
-
     const supabase = getSupabase();
     console.log(`[LOGIN] Attempting login for ${email}`);
 
@@ -88,7 +68,6 @@ export const SecureApiService = {
 
       if (admin) {
         console.log("[LOGIN] Admin found, verifying password...");
-        // For now, simple comparison (will be hashed in next step)
         if (admin.password_hash === pass) {
           console.log("[LOGIN] ✅ Admin login successful");
           return { success: true, role: 'SUPER_ADMIN' as UserRole };
@@ -108,7 +87,7 @@ export const SecureApiService = {
         return { success: false, message: "Identifiants incorrects." };
       }
       
-      // Verify password (simple comparison for now)
+      // Verify password
       if (company.password_hash !== pass) {
         return { success: false, message: "Mot de passe incorrect." };
       }
@@ -130,30 +109,10 @@ export const SecureApiService = {
   },
 
   register: async (companyName: string, email: string, password: string) => {
-    // Rate limiting
-    if (!checkRateLimit(`register_${email}`, 3, 300000)) {
-      return { success: false, message: "Trop de tentatives. Réessayez dans 5 minutes." };
-    }
-
-    // Validation
-    if (!validateEmail(email)) {
-      return { success: false, message: "Format d'email invalide." };
-    }
-
-    const passwordValidation = validatePassword(password);
-    if (!passwordValidation.valid) {
-      return { success: false, message: passwordValidation.message };
-    }
-
-    const companyValidation = validateCompanyName(companyName);
-    if (!companyValidation.valid) {
-      return { success: false, message: companyValidation.message };
-    }
-
     const supabase = getSupabase();
     
     try {
-      // Check if email exists
+      // Check if email exists in companies
       const { data: existing } = await supabase
         .from('companies')
         .select('id')
@@ -179,16 +138,13 @@ export const SecureApiService = {
       const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
       const senderId = companyName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 11).toUpperCase();
 
-      // Hash password (for now using simple method, will enhance)
-      const passwordHash = await hashPassword(password);
-
       // Create company
       const { data: newComp, error } = await supabase
         .from('companies')
         .insert([{
-          name: sanitizeHtml(companyName),
+          name: companyName,
           email: email.toLowerCase().trim(),
-          password_hash: passwordHash,
+          password_hash: password,
           status: 'pending_verification',
           verification_code: verificationCode,
           subscription_plan: 'basic',
@@ -202,7 +158,7 @@ export const SecureApiService = {
         return { success: false, message: "Erreur lors de l'inscription: " + error.message };
       }
 
-      // Create default settings
+      // ✅ CETTE PARTIE CRÉE LES SETTINGS AUTOMATIQUEMENT
       const defaultWebForm = {
         enabled: true,
         logo_url: "",
@@ -232,9 +188,10 @@ export const SecureApiService = {
         client_sms_message: ""
       };
 
-      await supabase.from('settings').insert([{
+      // Créer les settings pour la nouvelle company
+      const { error: settingsError } = await supabase.from('settings').insert([{
         company_id: newComp.id,
-        company_name: sanitizeHtml(companyName),
+        company_name: companyName,
         sms_sender_id: senderId,
         admin_email: email,
         sms_credits: 10,
@@ -246,6 +203,11 @@ export const SecureApiService = {
         use_custom_provider: false,
         custom_provider_type: 'ovh'
       }]);
+
+      if (settingsError) {
+        console.error("[REGISTER] Settings creation error:", settingsError);
+        // On continue quand même, les settings pourront être créés plus tard
+      }
 
       console.log(`[REGISTER] ✅ Account created. Verification code: ${verificationCode}`);
       return { success: true, requireVerification: true, debugCode: verificationCode };
@@ -343,18 +305,9 @@ export const SecureApiService = {
     const supabase = getSupabase();
     
     try {
-      // Sanitize inputs
-      const sanitizedSettings = {
-        ...newSettings,
-        company_name: sanitizeHtml(newSettings.company_name),
-        company_tagline: sanitizeHtml(newSettings.company_tagline),
-        sms_message: sanitizeHtml(newSettings.sms_message),
-        sms_sender_id: newSettings.sms_sender_id.replace(/[^A-Z0-9]/g, '').substring(0, 11)
-      };
-
       const { data, error } = await supabase
         .from('settings')
-        .update(sanitizedSettings)
+        .update(newSettings)
         .eq('company_id', companyId)
         .select()
         .single();
@@ -436,15 +389,12 @@ export const SecureApiService = {
     const ticketNumber = `#REQ-${Math.floor(1000 + Math.random() * 9000)}`;
     
     try {
-      // Sanitize answers
-      const sanitizedAnswers = sanitizeObject(answers);
-
       const { error } = await supabase
         .from('form_submissions')
         .insert([{
           company_id: companyId,
           ticket_number: ticketNumber,
-          answers: sanitizedAnswers,
+          answers: answers,
           marketing_optin: marketingOptin,
           status: 'new',
           phone: `+336${Math.floor(Math.random()*100000000)}`
@@ -590,23 +540,20 @@ export const SecureApiService = {
     const senderId = details.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 11).toUpperCase();
     
     try {
-      // Hash password
-      const passwordHash = await hashPassword(details.password || 'admin');
-
       const { data: newComp, error } = await supabase
         .from('companies')
         .insert([{
-          name: sanitizeHtml(details.name),
+          name: details.name,
           email: details.email,
-          password_hash: passwordHash,
+          password_hash: details.password || 'admin',
           status: 'active',
           subscription_plan: details.plan,
           siret: details.siret,
           vat_number: details.vat_number,
-          address: sanitizeHtml(details.address || ''),
+          address: details.address || '',
           phone: details.phone,
-          contact_name: sanitizeHtml(details.contact_name || ''),
-          notes: sanitizeHtml(details.notes || ''),
+          contact_name: details.contact_name || '',
+          notes: details.notes || '',
           credit_history: []
         }])
         .select()
@@ -616,7 +563,7 @@ export const SecureApiService = {
 
       await supabase.from('settings').insert([{
         company_id: newComp.id,
-        company_name: sanitizeHtml(details.name),
+        company_name: details.name,
         sms_sender_id: senderId,
         admin_email: details.email,
         sms_credits: initialCredits,
@@ -674,7 +621,7 @@ export const SecureApiService = {
         date: new Date().toISOString(),
         amount_credits: amount,
         amount_paid: amountPaid,
-        reference: sanitizeHtml(reference),
+        reference: reference,
         type: 'credit'
       });
       
