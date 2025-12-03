@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Lock, User, ArrowRight, ShieldCheck } from 'lucide-react';
-import { ApiService } from '../services/api';
+import { ApiService } from '../services/supabaseApi';
 import { UserRole } from '../types';
 
 interface LoginProps {

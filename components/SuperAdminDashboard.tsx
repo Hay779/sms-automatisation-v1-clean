@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ApiService } from '../services/api';
+import { ApiService } from '../services/supabaseApi';
 import { CompanyStats, SystemConfig, SmsProvider, Company, CreditTransaction } from '../types';
 import { Users, Activity, AlertTriangle, LogIn, Trash2, Plus, Search, Server, Key, Globe, Save, Copy, ExternalLink, HelpCircle, Database, Coins, X, Smartphone, FileText, CheckCircle, RefreshCw, Briefcase, Lock, ClipboardList, Download, Zap } from 'lucide-react';
 

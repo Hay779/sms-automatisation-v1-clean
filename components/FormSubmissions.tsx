@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { ApiService } from '../services/api';
+import { ApiService } from '../services/supabaseApi';
 import { FormSubmission } from '../types';
 import { FormViewerModal } from './FormViewerModal';
 import { ExternalLink, Search, Calendar, FileText, ChevronRight, Inbox, CheckCircle, Archive, Clock, AlertCircle } from 'lucide-react';

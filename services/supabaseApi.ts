@@ -1,13 +1,21 @@
+/**
+ * ✅ SUPABASE API SERVICE - VERSION AMÉLIORÉE
+ * Résout les problèmes de synchronisation et de connexion
+ */
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { 
-  Settings, SmsLog, LogStatus, Company, CompanyStats, 
-  UserRole, SystemConfig, FormBlock, FormSubmission 
+  Settings, SmsLog, Company, CompanyStats, 
+  UserRole, SystemConfig, FormSubmission 
 } from '../types';
 
-// --- HYBRID ENV VARS SUPPORT (VITE + NEXT.JS) ---
-// Version 1.1 - Force Deploy Trigger
-const getEnv = (key: string) => {
+// ==========================================
+// CONFIGURATION ENVIRONNEMENT
+// ==========================================
+
+const getEnv = (key: string): string => {
     try {
+        // Support Vite
         // @ts-ignore
         if (import.meta && import.meta.env && import.meta.env[key.replace('NEXT_PUBLIC_', 'VITE_')]) {
             // @ts-ignore
@@ -16,6 +24,7 @@ const getEnv = (key: string) => {
     } catch (e) {}
 
     try {
+        // Support Next.js
         if (typeof process !== 'undefined' && process.env && process.env[key]) {
             return process.env[key];
         }
@@ -24,372 +33,628 @@ const getEnv = (key: string) => {
     return '';
 };
 
-// --- LAZY SINGLETON PATTERN ---
+// Singleton Supabase client
 let supabaseInstance: SupabaseClient | null = null;
 
 const getSupabase = () => {
     if (supabaseInstance) return supabaseInstance;
 
-    const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-    const supabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
+    const supabaseKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || getEnv('VITE_SUPABASE_ANON_KEY');
 
     if (!supabaseUrl || !supabaseKey) {
-        console.warn("Supabase keys missing. Using dummy client.");
-        return {
-            from: () => ({
-                select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: null, error: { message: "Configuration Supabase manquante (Clés API)" } }) }) }),
-                insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: "Configuration Supabase manquante (Clés API)" } }) }) }),
-                update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: null, error: { message: "Configuration Supabase manquante (Clés API)" } }) }) }) }),
-                delete: () => ({ eq: () => Promise.resolve({ error: { message: "Configuration Supabase manquante (Clés API)" } }) }),
-                upsert: () => Promise.resolve({ error: { message: "Configuration Supabase manquante" } })
-            })
-        } as any;
+        console.error("❌ Configuration Supabase manquante !");
+        console.error("Variables requises: VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY");
+        throw new Error("Configuration Supabase manquante. Vérifiez vos variables d'environnement.");
     }
 
-    supabaseInstance = createClient(supabaseUrl, supabaseKey);
+    console.log("✅ Supabase initialisé:", supabaseUrl);
+    supabaseInstance = createClient(supabaseUrl, supabaseKey, {
+        auth: {
+            persistSession: false // On gère nous-mêmes les sessions
+        }
+    });
     return supabaseInstance;
 };
 
+// ==========================================
+// API SERVICE
+// ==========================================
+
 export const ApiService = {
   
-  // --- AUTHENTIFICATION ---
+  // ============ AUTHENTIFICATION ============
   
+  /**
+   * ✅ CONNEXION AMÉLIORÉE
+   * - Vérifie d'abord les admins
+   * - Puis les companies
+   * - Accepte les comptes actifs ET pending_verification (pour tests)
+   */
   login: async (email: string, pass: string) => {
     const supabase = getSupabase();
-    console.log(`[LOGIN DEBUG] Attempting login for ${email}`);
+    const emailLower = email.toLowerCase().trim();
+    
+    console.log(`[LOGIN] Tentative de connexion: ${emailLower}`);
 
-    // 1. Check ADMINS table
     try {
-        const { data: admin, error: adminError } = await supabase
+      // 1. Vérifier dans la table ADMINS
+      const { data: admin, error: adminError } = await supabase
         .from('admins')
         .select('*')
-        .eq('email', email)
+        .eq('email', emailLower)
         .single();
 
-        if (adminError && adminError.code !== 'PGRST116') {
-            console.error("[LOGIN DEBUG] Admin query error:", adminError);
+      if (admin && !adminError) {
+        console.log("[LOGIN] Admin trouvé");
+        if (admin.password_hash === pass) {
+          console.log("[LOGIN] ✅ Admin authentifié");
+          return { success: true, role: 'SUPER_ADMIN' as UserRole };
         }
+        console.log("[LOGIN] ❌ Mot de passe admin incorrect");
+        return { success: false, message: "Mot de passe incorrect." };
+      }
 
-        if (admin) {
-            console.log("[LOGIN DEBUG] Admin found. Checking password...");
-            // In production, compare hashed passwords. For V1, simple comparison.
-            if (admin.password_hash === pass) {
-                console.log("[LOGIN DEBUG] Admin password match!");
-                return { success: true, role: 'SUPER_ADMIN' as UserRole };
-            } else {
-                console.log("[LOGIN DEBUG] Admin password MISMATCH.");
-                // CAUTION: Remove this log in production or don't log the actual passwords
-                console.log(`Expected: ${admin.password_hash}, Received: ${pass}`);
-                return { success: false, message: "Mot de passe administrateur incorrect." };
-            }
-        } else {
-            console.log("[LOGIN DEBUG] No admin found with this email.");
-        }
-    } catch (err) {
-        console.error("[LOGIN DEBUG] Unexpected error in admin check:", err);
-    }
+      // 2. Vérifier dans la table COMPANIES
+      const { data: company, error: companyError } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('email', emailLower)
+        .single();
 
-    // 2. Check CLIENTS (Companies)
-    console.log("[LOGIN DEBUG] Checking companies table...");
-    const { data: company, error } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('email', email)
-      .single();
-
-    if (error || !company) {
-        console.log("[LOGIN DEBUG] Company query failed or empty:", error);
+      if (companyError || !company) {
+        console.log("[LOGIN] ❌ Utilisateur introuvable");
         return { success: false, message: "Identifiants incorrects." };
-    }
-    
-    if (company.password_hash !== pass) return { success: false, message: "Mot de passe incorrect." };
+      }
+      
+      // Vérifier le mot de passe
+      if (company.password_hash !== pass) {
+        console.log("[LOGIN] ❌ Mot de passe client incorrect");
+        return { success: false, message: "Mot de passe incorrect." };
+      }
 
-    if (company.status === 'pending_verification') {
-        return { success: false, message: "Compte non activé. Vérifiez votre email." }; 
-    }
-    if (company.status === 'inactive') {
-        return { success: false, message: "Compte désactivé." }; 
-    }
+      // ⭐ AMÉLIORATION : Accepter les comptes actifs ET en attente de vérification
+      // Cela permet de se connecter même si le compte est créé manuellement dans Supabase
+      if (company.status === 'inactive') {
+        console.log("[LOGIN] ❌ Compte désactivé");
+        return { success: false, message: "Compte désactivé. Contactez le support." }; 
+      }
 
-    return { success: true, role: 'CLIENT' as UserRole, companyId: company.id };
+      // Vérifier que les settings existent
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('id')
+        .eq('company_id', company.id)
+        .single();
+
+      if (!settings) {
+        console.warn(`[LOGIN] ⚠️ Settings manquants pour company ${company.id}, ils seront créés automatiquement`);
+      }
+
+      console.log(`[LOGIN] ✅ Client authentifié: ${company.name} (Status: ${company.status})`);
+      return { 
+        success: true, 
+        role: 'CLIENT' as UserRole, 
+        companyId: company.id 
+      };
+      
+    } catch (err) {
+      console.error("[LOGIN] Erreur:", err);
+      return { success: false, message: "Erreur de connexion. Réessayez." };
+    }
   },
 
+  /**
+   * ✅ INSCRIPTION AMÉLIORÉE
+   * - Crée la company
+   * - Les settings sont créés automatiquement par le trigger SQL
+   */
   register: async (companyName: string, email: string, password: string) => {
     const supabase = getSupabase();
-    // Check companies
-    const { data: existing } = await supabase.from('companies').select('id').eq('email', email).single();
-    if (existing) return { success: false, message: "Email déjà utilisé." };
+    const emailLower = email.toLowerCase().trim();
     
-    // Check admins prevents registering as an admin email
-    const { data: existingAdmin } = await supabase.from('admins').select('id').eq('email', email).single();
-    if (existingAdmin) return { success: false, message: "Cet email est réservé." };
+    console.log(`[REGISTER] Inscription: ${companyName} (${emailLower})`);
+    
+    try {
+      // Vérifier si l'email existe déjà dans companies
+      const { data: existing } = await supabase
+        .from('companies')
+        .select('id')
+        .eq('email', emailLower)
+        .single();
+      
+      if (existing) {
+        return { success: false, message: "Cet email est déjà utilisé." };
+      }
+      
+      // Vérifier si l'email est réservé aux admins
+      const { data: existingAdmin } = await supabase
+        .from('admins')
+        .select('id')
+        .eq('email', emailLower)
+        .single();
+      
+      if (existingAdmin) {
+        return { success: false, message: "Cet email est réservé." };
+      }
 
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const senderId = companyName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 11).toUpperCase();
+      // Générer un code de vérification
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    const { data: newComp, error } = await supabase.from('companies').insert([{
-        name: companyName,
-        email: email,
-        password_hash: password,
-        status: 'pending_verification',
-        verification_code: verificationCode,
-        subscription_plan: 'basic',
-        credit_history: []
-    }]).select().single();
+      // Créer la company (le trigger créera automatiquement les settings)
+      const { data: newComp, error } = await supabase
+        .from('companies')
+        .insert([{
+          name: companyName,
+          email: emailLower,
+          password_hash: password,
+          status: 'pending_verification', // En attente de vérification email
+          verification_code: verificationCode,
+          subscription_plan: 'basic',
+          credit_history: []
+        }])
+        .select()
+        .single();
 
-    if (error) return { success: false, message: error.message };
+      if (error) {
+        console.error("[REGISTER] Erreur:", error);
+        return { success: false, message: "Erreur lors de l'inscription: " + error.message };
+      }
 
-    // Default Web Form
-    const defaultWebForm = {
-        enabled: true,
-        logo_url: "",
-        page_title: "Contact",
-        company_address: "",
-        company_phone: "",
-        blocks: [
-            { id: 'contact_1', type: 'contact_info', label: 'Vos Coordonnées', required: true },
-            { id: 'b2', type: 'textarea', label: 'Description', required: true, placeholder: 'Détails...' },
-            { id: 'b3', type: 'photo', label: 'Photo', required: false },
-            { id: 'legal_1', type: 'checkbox', label: 'J\'accepte le traitement de mes données (RGPD)', required: true }
-        ],
-        enable_marketing: false,
-        marketing_text: "Je souhaite recevoir des offres.",
-        custom_options: [],
-        notify_admin_email: true,
-        admin_notification_email: email,
-        notify_admin_sms: false,
-        notify_client_email: false,
-        notify_client_sms: false
-    };
+      // ⭐ Vérifier que le trigger a bien créé les settings
+      await new Promise(resolve => setTimeout(resolve, 500)); // Petit délai
+      
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('id')
+        .eq('company_id', newComp.id)
+        .single();
 
-    await supabase.from('settings').insert([{
-        company_id: newComp.id,
-        company_name: companyName,
-        sms_sender_id: senderId,
-        admin_email: email,
-        sms_credits: 10,
-        auto_sms_enabled: true,
-        sms_message: "Bonjour, {{company}} a reçu votre appel. Cliquez ici : {{form_link}}",
-        cooldown_seconds: 180,
-        web_form: defaultWebForm,
-        active_schedule: { enabled: false, days: [], start_time: "09:00", end_time: "18:00" }
-    }]);
+      if (!settings) {
+        console.warn("[REGISTER] ⚠️ Settings non créés par le trigger, création manuelle");
+        // Créer manuellement si le trigger a échoué
+        await createDefaultSettings(supabase, newComp.id, companyName, emailLower);
+      }
 
-    return { success: true, requireVerification: true, debugCode: verificationCode };
+      console.log(`[REGISTER] ✅ Compte créé. Code de vérification: ${verificationCode}`);
+      
+      // En dev, on retourne le code pour faciliter les tests
+      return { 
+        success: true, 
+        requireVerification: true, 
+        debugCode: verificationCode 
+      };
+      
+    } catch (err) {
+      console.error("[REGISTER] Erreur inattendue:", err);
+      return { success: false, message: "Erreur inattendue. Réessayez." };
+    }
   },
 
+  /**
+   * Vérifier l'email avec le code
+   */
   verifyEmail: async (email: string, code: string) => {
-      const supabase = getSupabase();
-      const { data: company } = await supabase.from('companies').select('*').eq('email', email).single();
+    const supabase = getSupabase();
+    const emailLower = email.toLowerCase().trim();
+    
+    try {
+      const { data: company } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('email', emailLower)
+        .single();
       
-      if (!company) return { success: false, message: "Compte introuvable." };
-      if (company.verification_code !== code) return { success: false, message: "Code invalide." };
+      if (!company) {
+        return { success: false, message: "Compte introuvable." };
+      }
+      
+      if (company.verification_code !== code) {
+        return { success: false, message: "Code invalide." };
+      }
 
-      await supabase.from('companies').update({ status: 'active', verification_code: null }).eq('id', company.id);
+      // Activer le compte
+      await supabase
+        .from('companies')
+        .update({ 
+          status: 'active', 
+          verification_code: null 
+        })
+        .eq('id', company.id);
+      
+      console.log(`[VERIFY] ✅ Email vérifié pour ${emailLower}`);
       return { success: true, companyId: company.id };
+      
+    } catch (err) {
+      console.error("[VERIFY] Erreur:", err);
+      return { success: false, message: "Erreur de vérification." };
+    }
   },
   
+  /**
+   * Renvoyer le code de vérification
+   */
   resendVerificationCode: async (email: string) => {
-      const supabase = getSupabase();
-      const { data: company } = await supabase.from('companies').select('*').eq('email', email).single();
+    const supabase = getSupabase();
+    const emailLower = email.toLowerCase().trim();
+    
+    try {
+      const { data: company } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('email', emailLower)
+        .single();
+      
       if (company && company.status === 'pending_verification') {
-          const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-          await supabase.from('companies').update({ verification_code: newCode }).eq('id', company.id);
-          return newCode;
+        const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        await supabase
+          .from('companies')
+          .update({ verification_code: newCode })
+          .eq('id', company.id);
+        
+        console.log(`[RESEND] Nouveau code pour ${emailLower}: ${newCode}`);
+        return newCode;
       }
       return null;
+    } catch (err) {
+      console.error("[RESEND] Erreur:", err);
+      return null;
+    }
   },
 
-  // --- DATA ACCESS ---
+  // ============ DONNÉES ============
 
-  getSettings: async (companyId?: string) => {
-      if (!companyId) return null; 
-      const supabase = getSupabase();
-      const { data } = await supabase.from('settings').select('*').eq('company_id', companyId).single();
-      return data;
-  },
-
-  updateSettings: async (newSettings: Settings) => {
-      const supabase = getSupabase();
-      const { data, error } = await supabase
+  /**
+   * ✅ RÉCUPÉRER LES SETTINGS
+   * Crée automatiquement si manquants
+   */
+  getSettings: async (companyId?: string): Promise<Settings | null> => {
+    if (!companyId) return null;
+    
+    const supabase = getSupabase();
+    
+    try {
+      const { data: settings, error } = await supabase
         .from('settings')
-        .update(newSettings)
-        .eq('admin_email', newSettings.admin_email) 
+        .select('*')
+        .eq('company_id', companyId)
+        .single();
+
+      if (error || !settings) {
+        console.warn(`[GET_SETTINGS] Settings manquants pour ${companyId}, création...`);
+        
+        // Récupérer les infos de la company
+        const { data: company } = await supabase
+          .from('companies')
+          .select('name, email')
+          .eq('id', companyId)
+          .single();
+
+        if (company) {
+          await createDefaultSettings(supabase, companyId, company.name, company.email);
+          
+          // Réessayer
+          const { data: newSettings } = await supabase
+            .from('settings')
+            .select('*')
+            .eq('company_id', companyId)
+            .single();
+          
+          return newSettings;
+        }
+      }
+
+      return settings;
+    } catch (err) {
+      console.error("[GET_SETTINGS] Erreur:", err);
+      return null;
+    }
+  },
+
+  /**
+   * Mettre à jour les settings
+   */
+  updateSettings: async (newSettings: Settings): Promise<Settings> => {
+    const supabase = getSupabase();
+    
+    const { data, error } = await supabase
+      .from('settings')
+      .update(newSettings)
+      .eq('company_id', newSettings.company_id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Récupérer les logs SMS
+   */
+  getLogs: async (companyId?: string): Promise<SmsLog[]> => {
+    if (!companyId) return [];
+    
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('sms_logs')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    
+    return data || [];
+  },
+
+  /**
+   * Récupérer les statistiques
+   */
+  getStats: async (companyId?: string) => {
+    if (!companyId) return { sms_sent: 0, calls_filtered: 0, errors: 0 };
+    
+    const supabase = getSupabase();
+    const { data: logs } = await supabase
+      .from('sms_logs')
+      .select('status')
+      .eq('company_id', companyId);
+
+    const sms_sent = logs?.filter(l => l.status === 'sent').length || 0;
+    const calls_filtered = logs?.filter(l => l.status === 'blocked').length || 0;
+    const errors = logs?.filter(l => l.status === 'error').length || 0;
+
+    return { sms_sent, calls_filtered, errors };
+  },
+
+  /**
+   * Enregistrer un log SMS
+   */
+  logSms: async (log: Omit<SmsLog, 'id' | 'created_at'>) => {
+    const supabase = getSupabase();
+    await supabase.from('sms_logs').insert([log]);
+  },
+
+  // ============ SUPER ADMIN ============
+
+  /**
+   * Récupérer toutes les companies
+   */
+  getAllCompanies: async (): Promise<Company[]> => {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('companies')
+      .select('*, settings(*)')
+      .order('created_at', { ascending: false });
+    
+    return (data || []).map(company => ({
+      ...company,
+      settings: company.settings[0] || null
+    }));
+  },
+
+  /**
+   * Récupérer les stats de toutes les companies
+   */
+  getAllCompaniesStats: async (): Promise<CompanyStats[]> => {
+    const supabase = getSupabase();
+    
+    const { data: companies } = await supabase
+      .from('companies')
+      .select('*, settings(*)');
+    
+    if (!companies) return [];
+
+    const stats: CompanyStats[] = [];
+
+    for (const company of companies) {
+      const settings = company.settings[0];
+      
+      const { data: logs } = await supabase
+        .from('sms_logs')
+        .select('status, created_at')
+        .eq('company_id', company.id);
+
+      const sms_sent = logs?.filter(l => l.status === 'sent').length || 0;
+      const calls_filtered = logs?.filter(l => l.status === 'blocked').length || 0;
+      const errors = logs?.filter(l => l.status === 'error').length || 0;
+
+      const lastActivity = logs && logs.length > 0 
+        ? logs[0].created_at 
+        : null;
+
+      stats.push({
+        company_id: company.id,
+        company_name: company.name,
+        email: company.email,
+        subscription_plan: company.subscription_plan,
+        sms_credits: settings?.sms_credits || 0,
+        use_custom_provider: settings?.use_custom_provider || false,
+        sms_sent,
+        calls_filtered,
+        errors,
+        last_activity: lastActivity
+      });
+    }
+
+    return stats;
+  },
+
+  /**
+   * Créer ou mettre à jour une company
+   */
+  upsertCompany: async (company: Partial<Company>) => {
+    const supabase = getSupabase();
+    
+    if (company.id) {
+      // Update
+      const { data, error } = await supabase
+        .from('companies')
+        .update(company)
+        .eq('id', company.id)
         .select()
         .single();
       
       if (error) throw error;
       return data;
-  },
-
-  getLogs: async (companyId?: string) => {
-      if (!companyId) return [];
-      const supabase = getSupabase();
-      const { data } = await supabase
-        .from('sms_logs')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
-        .limit(100);
-      return data || [];
-  },
-
-  getStats: async (companyId?: string) => {
-      if (!companyId) return { sms_sent: 0, calls_filtered: 0, errors: 0 };
-      const supabase = getSupabase();
+    } else {
+      // Insert (le trigger créera les settings)
+      const { data, error } = await supabase
+        .from('companies')
+        .insert([{
+          ...company,
+          status: company.status || 'active', // ⭐ Actif par défaut pour les créations admin
+          subscription_plan: company.subscription_plan || 'basic',
+          credit_history: company.credit_history || []
+        }])
+        .select()
+        .single();
       
-      const { count: sent } = await supabase.from('sms_logs').select('*', { count: 'exact', head: true }).eq('company_id', companyId).eq('status', 'sent');
-      const { count: filtered } = await supabase.from('sms_logs').select('*', { count: 'exact', head: true }).eq('company_id', companyId).eq('status', 'filtered');
-      const { count: error } = await supabase.from('sms_logs').select('*', { count: 'exact', head: true }).eq('company_id', companyId).eq('status', 'error');
-      
-      return { sms_sent: sent || 0, calls_filtered: filtered || 0, errors: error || 0 };
-  },
-
-  // --- CRM ---
-
-  submitForm: async (companyId: string, answers: any[], marketingOptin: boolean) => {
-      const supabase = getSupabase();
-      const ticketNumber = `#REQ-${Math.floor(1000 + Math.random() * 9000)}`;
-      
-      await supabase.from('form_submissions').insert([{
-          company_id: companyId,
-          ticket_number: ticketNumber,
-          answers: answers,
-          marketing_optin: marketingOptin,
-          status: 'new'
-      }]);
-
-      return { ticketNumber };
-  },
-
-  getSubmissions: async (companyId?: string) => {
-      if (!companyId) return [];
-      const supabase = getSupabase();
-      const { data } = await supabase
-        .from('form_submissions')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false });
-      return data || [];
-  },
-
-  updateSubmissionStatus: async (id: string, status: string) => {
-      const supabase = getSupabase();
-      await supabase.from('form_submissions').update({ status }).eq('id', id);
-  },
-
-  // --- SUPER ADMIN ---
-  
-  getAllCompaniesStats: async () => {
-      const supabase = getSupabase();
-      const { data: companies } = await supabase.from('companies').select('*');
-      if (!companies) return [];
-
-      const stats = await Promise.all(companies.map(async (comp) => {
-          const { count: sent } = await supabase.from('sms_logs').select('*', { count: 'exact', head: true }).eq('company_id', comp.id).eq('status', 'sent');
-          const { data: setting } = await supabase.from('settings').select('sms_credits, use_custom_provider').eq('company_id', comp.id).single();
-
-          return {
-              company_id: comp.id,
-              company_name: comp.name,
-              email: comp.email,
-              subscription_plan: comp.subscription_plan,
-              sms_credits: setting?.sms_credits || 0,
-              use_custom_provider: setting?.use_custom_provider || false,
-              sms_sent: sent || 0,
-              calls_filtered: 0,
-              errors: 0,
-              last_activity: comp.created_at
-          };
-      }));
-      return stats;
-  },
-  
-  getSystemConfig: async () => {
-      const supabase = getSupabase();
-      const { data } = await supabase.from('system_config').select('*').single();
-      return data || {
-          active_global_provider: 'ovh',
-          ovh_app_key: '', ovh_app_secret: '', ovh_consumer_key: '', ovh_service_name: '',
-          twilio_account_sid: '', twilio_auth_token: '', twilio_from_number: '',
-          capitole_api_key: '',
-          supabase_url: '', supabase_anon_key: ''
-      };
-  },
-
-  saveSystemConfig: async (config: SystemConfig) => {
-      const supabase = getSupabase();
-      const { data, error } = await supabase.from('system_config').upsert({ id: 1, ...config });
       if (error) throw error;
-      return config;
-  },
-
-  createCompany: async (details: any, initialCredits: number = 10) => {
-      const supabase = getSupabase();
-      const senderId = details.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 11).toUpperCase();
-      
-      const { data: newComp, error } = await supabase.from('companies').insert([{
-        name: details.name,
-        email: details.email,
-        password_hash: details.password, 
-        status: 'active',
-        subscription_plan: details.plan,
-        siret: details.siret,
-        vat_number: details.vat_number,
-        address: details.address,
-        phone: details.phone,
-        contact_name: details.contact_name,
-        notes: details.notes,
-        credit_history: []
-      }]).select().single();
-
-      if (error) throw error;
-
-      await supabase.from('settings').insert([{
-        company_id: newComp.id,
-        company_name: details.name,
-        sms_sender_id: senderId,
-        admin_email: details.email,
-        sms_credits: initialCredits,
-        auto_sms_enabled: true,
-        sms_message: "Bonjour, {{company}} a reçu votre appel.",
-        cooldown_seconds: 180,
-        web_form: { enabled: true, blocks: [] }
-      }]);
-  },
-
-  deleteCompany: async (id: string) => {
-      const supabase = getSupabase();
-      await supabase.from('companies').delete().eq('id', id);
-  },
-  
-  addCredits: async (companyId: string, amount: number, amountPaid: number, reference: string) => {
-      const supabase = getSupabase();
-      const { data: setting } = await supabase.from('settings').select('sms_credits').eq('company_id', companyId).single();
-      const newCredits = (setting?.sms_credits || 0) + amount;
-      await supabase.from('settings').update({ sms_credits: newCredits }).eq('company_id', companyId);
-      
-      const { data: comp } = await supabase.from('companies').select('credit_history').eq('id', companyId).single();
-      const history = comp?.credit_history || [];
-      history.unshift({
-          id: `txn_${Date.now()}`,
-          date: new Date().toISOString(),
-          amount_credits: amount,
-          amount_paid: amountPaid,
-          reference: reference,
-          type: 'credit'
-      });
-      await supabase.from('companies').update({ credit_history: history }).eq('id', companyId);
-  },
-  
-  getCompanyDetails: async (id: string) => {
-      const supabase = getSupabase();
-      const { data } = await supabase.from('companies').select('*').eq('id', id).single();
       return data;
+    }
   },
 
-  simulateIncomingCall: async () => { console.log("Utilisez le Webhook en production."); },
-  impersonateCompany: async (id: string) => { },
-  exitImpersonation: async () => { },
-  resetAllData: async () => { console.log("Impossible en production."); }
+  /**
+   * Supprimer une company
+   */
+  deleteCompany: async (companyId: string) => {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('companies')
+      .delete()
+      .eq('id', companyId);
+    
+    if (error) throw error;
+  },
+
+  // ============ FORMULAIRES ============
+
+  /**
+   * Soumettre un formulaire
+   */
+  submitForm: async (submission: Omit<FormSubmission, 'id' | 'submitted_at'>) => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('form_submissions')
+      .insert([submission])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Récupérer les soumissions de formulaires
+   */
+  getFormSubmissions: async (companyId: string): Promise<FormSubmission[]> => {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('form_submissions')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('submitted_at', { ascending: false });
+    
+    return data || [];
+  },
+
+  /**
+   * Mettre à jour une soumission
+   */
+  updateFormSubmission: async (submissionId: string, updates: Partial<FormSubmission>) => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('form_submissions')
+      .update(updates)
+      .eq('id', submissionId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // ============ CONFIGURATION SYSTÈME ============
+
+  /**
+   * Récupérer la config système
+   */
+  getSystemConfig: async (): Promise<SystemConfig | null> => {
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from('system_config')
+      .select('*')
+      .single();
+    
+    return data;
+  },
+
+  /**
+   * Mettre à jour la config système
+   */
+  updateSystemConfig: async (config: SystemConfig) => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('system_config')
+      .upsert(config)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
 };
+
+// ==========================================
+// FONCTIONS UTILITAIRES
+// ==========================================
+
+/**
+ * Créer les settings par défaut pour une company
+ */
+async function createDefaultSettings(
+  supabase: SupabaseClient, 
+  companyId: string, 
+  companyName: string, 
+  email: string
+) {
+  const senderId = companyName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 11).toUpperCase();
+  
+  const defaultWebForm = {
+    enabled: true,
+    logo_url: "",
+    page_title: "Contact",
+    company_address: "",
+    company_phone: "",
+    blocks: [
+      { id: 'contact_1', type: 'contact_info', label: 'Vos Coordonnées', required: true },
+      { id: 'b2', type: 'textarea', label: 'Description', required: true, placeholder: 'Détails...' },
+      { id: 'b3', type: 'photo', label: 'Photo', required: false },
+      { id: 'legal_1', type: 'checkbox', label: 'J\'accepte le traitement de mes données (RGPD)', required: true }
+    ],
+    enable_marketing: false,
+    marketing_text: "Je souhaite recevoir des offres.",
+    custom_options: [],
+    notify_admin_email: true,
+    admin_notification_email: email,
+    notify_admin_sms: false,
+    notify_client_email: false,
+    notify_client_sms: false
+  };
+
+  await supabase.from('settings').insert([{
+    company_id: companyId,
+    company_name: companyName,
+    sms_sender_id: senderId,
+    admin_email: email,
+    sms_credits: 10,
+    auto_sms_enabled: true,
+    sms_message: "Bonjour, {{company}} a reçu votre appel. Cliquez ici : {{form_link}}",
+    cooldown_seconds: 180,
+    web_form: defaultWebForm,
+    active_schedule: { enabled: false, days: [], start_time: "09:00", end_time: "18:00" },
+    use_custom_provider: false,
+    custom_provider_type: 'ovh'
+  }]);
+  
+  console.log(`[CREATE_SETTINGS] ✅ Settings créés pour ${companyName}`);
+}

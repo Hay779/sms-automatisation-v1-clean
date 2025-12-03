@@ -10,7 +10,7 @@ import { PublicForm } from './components/PublicForm';
 import { FormSubmissions } from './components/FormSubmissions';
 import { LandingPage } from './components/LandingPage';
 // Using secure enhanced API service
-import { SecureApiService as ApiService } from './services/secureSupabaseApi';
+import { ApiService } from './services/supabaseApi';
 import { Settings, SmsLog, DashboardStats, UserRole } from './types';
 import { Loader2 } from 'lucide-react';
 

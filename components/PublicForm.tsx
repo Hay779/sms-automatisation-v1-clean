@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Settings, FormBlock } from '../types';
 import { Image, Video, CheckSquare, MapPin, Phone, ArrowLeft, Send } from 'lucide-react';
-import { ApiService } from '../services/api';
+import { ApiService } from '../services/supabaseApi';
 
 interface PublicFormProps {
   settings: Settings;

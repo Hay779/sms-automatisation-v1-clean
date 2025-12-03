@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { SmsLog, LogStatus, FormSubmission } from '../types';
 import { Phone, AlertCircle, CheckCircle, Ban, Search, Filter, Download, FileText, ArrowRight } from 'lucide-react';
-import { ApiService } from '../services/api';
+import { ApiService } from '../services/supabaseApi';
 import { FormViewerModal } from './FormViewerModal';
 
 interface LogTableProps {
