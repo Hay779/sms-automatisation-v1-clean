@@ -16,7 +16,12 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onImpe
       ovh_app_key: '', ovh_app_secret: '', ovh_consumer_key: '', ovh_service_name: '',
       twilio_account_sid: '', twilio_auth_token: '', twilio_from_number: '',
       capitole_api_key: '',
-      supabase_url: '', supabase_anon_key: ''
+      supabase_url: '', supabase_anon_key: '',
+      pricing_tiers: [
+        { min: 1, max: 99, price: 0.10 },
+        { min: 100, max: 499, price: 0.08 },
+        { min: 500, max: 999999, price: 0.05 }
+      ]
   });
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,7 +47,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onImpe
         ApiService.getSystemConfig()
     ]);
     setStats(companiesData);
-    setSystemConfig(configData);
+    if (configData) {
+      setSystemConfig({
+        ...configData,
+        pricing_tiers: configData.pricing_tiers || [
+          { min: 1, max: 99, price: 0.10 },
+          { min: 100, max: 499, price: 0.08 },
+          { min: 500, max: 999999, price: 0.05 }
+        ]
+      });
+    }
     setIsLoading(false);
   };
 
@@ -89,11 +103,22 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onImpe
   };
 
   const handleConfirmCredits = async (e: React.FormEvent) => {
-      e.preventDefault();
+  e.preventDefault();
       if (creditForm.amount > 0) {
-          await ApiService.addCredits(creditForm.companyId, creditForm.amount, creditForm.price, creditForm.reference);
-          setShowCreditModal(false);
-          loadData();
+          // Calculer prix auto selon palier
+          const tier = systemConfig.pricing_tiers?.find(
+            t => creditForm.amount >= t.min && creditForm.amount <= t.max
+          );
+          const autoPrice = tier ? creditForm.amount * tier.price : 0;
+          
+          await ApiService.addCredits(
+            creditForm.companyId, 
+            creditForm.amount, 
+            autoPrice,
+            creditForm.reference || `CREDIT-${Date.now()}`
+          );
+         setShowCreditModal(false);
+await loadData(); // Attendre le reload
       }
   };
 
@@ -229,26 +254,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onImpe
                           )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                          {stat.use_custom_provider ? (
-                              <span className="text-xs font-mono text-indigo-500 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
-                                  EXTERNE
-                              </span>
-                          ) : (
-                              <div className="flex items-center space-x-2">
-                                  <span className={`font-bold text-sm ${stat.sms_credits < 10 ? 'text-rose-600' : 'text-slate-700'}`}>
-                                      {stat.sms_credits}
-                                  </span>
-                                  <button 
-                                    onClick={() => openCreditModal(stat.company_id, stat.company_name)}
-                                    className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 rounded-md px-2 py-1 flex items-center space-x-1 text-xs font-medium transition-colors"
-                                    title="Ajouter des crédits"
-                                  >
-                                      <Plus className="w-3 h-3" />
-                                      <span>Ajouter</span>
-                                  </button>
-                              </div>
-                          )}
-                      </td>
+    {stat.use_custom_provider ? (
+        <span className="text-xs font-mono text-indigo-500 bg-indigo-50 px-2 py-1 rounded border border-indigo-100">
+            EXTERNE
+        </span>
+    ) : (
+        <div className="flex items-center space-x-2">
+            <span className={`font-bold text-sm ${stat.sms_credits < 10 ? 'text-rose-600' : 'text-slate-700'}`}>
+                {stat.sms_credits}
+            </span>
+            <button 
+                onClick={() => openCreditModal(stat.company_id, stat.company_name)}
+                className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 rounded-md px-2 py-1 flex items-center space-x-1 text-xs font-medium transition-colors"
+                title="Ajouter des crédits"
+            >
+                <Plus className="w-3 h-3" />
+                <span>Ajouter</span>
+            </button>
+        </div>
+    )}
+</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
                           {stat.sms_sent} envoyés
@@ -717,18 +742,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onImpe
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-slate-600 mb-1">Montant Payé (€)</label>
-                            <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            className="block w-full rounded-md border-slate-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 text-lg p-2 border font-bold text-slate-700"
-                            value={creditForm.price}
-                            onChange={e => setCreditForm({...creditForm, price: parseFloat(e.target.value)})}
-                            />
+                            <div className="block w-full rounded-md border-slate-300 bg-slate-50 text-lg p-2 border font-bold text-emerald-600">
+                            {(() => {
+                                const tier = systemConfig.pricing_tiers?.find(
+                                t => creditForm.amount >= t.min && creditForm.amount <= t.max
+                                );
+                                return tier ? `${(creditForm.amount * tier.price).toFixed(2)} €` : '0.00 €';
+                            })()}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">
+                            {(() => {
+                                const tier = systemConfig.pricing_tiers?.find(
+                                t => creditForm.amount >= t.min && creditForm.amount <= t.max
+                                );
+                                return tier ? `Tarif : ${tier.price}€/SMS` : 'Aucun palier trouvé';
+                            })()}
+                            </p>
                         </div>
                         <div className="col-span-2">
-                             <label className="block text-xs font-bold text-slate-600 mb-1">Référence / Facture</label>
-                             <input
+                            <label className="block text-xs font-bold text-slate-600 mb-1">Référence / Facture</label>
+                            <input
                                 type="text"
                                 className="block w-full rounded-md border-slate-300 shadow-sm text-sm p-2 border"
                                 placeholder="Ex: FAC-2024-001"

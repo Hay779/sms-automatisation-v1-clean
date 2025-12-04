@@ -187,4 +187,5 @@ export interface SystemConfig {
   capitole_api_key: string;
   supabase_url: string;
   supabase_anon_key: string;
+  pricing_tiers?: { min: number; max: number; price: number }[];
 }

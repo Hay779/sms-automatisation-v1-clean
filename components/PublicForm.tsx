@@ -35,6 +35,15 @@ export const PublicForm: React.FC<PublicFormProps> = ({ settings, onClose, compa
     e.preventDefault();
     setIsSubmitting(true);
     
+    // Extract phone from contact_info block
+    const contactBlock = formConfig.blocks.find(b => b.type === 'contact_info');
+    let phone = '0000000000'; // Default fallback
+    
+    if (contactBlock && formData[contactBlock.id]) {
+      // Try to get phone from contact block
+      phone = formData[contactBlock.id].phone || formData[contactBlock.id].email || '0000000000';
+    }
+    
     // Prepare data
     const answers = Object.entries(formData).map(([blockId, value]) => {
         const block = formConfig.blocks.find(b => b.id === blockId);
@@ -45,11 +54,22 @@ export const PublicForm: React.FC<PublicFormProps> = ({ settings, onClose, compa
         };
     });
 
+    // Generate ticket number
+    const ticketNum = `#REQ-${Date.now().toString().slice(-6)}`;
+
     try {
-        const result = await ApiService.submitForm(companyId, answers, marketingOptin);
-        setTicketNumber(result.ticketNumber);
+        await ApiService.submitForm({
+          company_id: companyId,
+          phone: phone,
+          answers: answers,
+          marketing_optin: marketingOptin,
+          status: 'new',
+          ticket_number: ticketNum
+        });
+        setTicketNumber(ticketNum);
     } catch (error) {
-        alert("Erreur lors de l'envoi.");
+        console.error('Submit error:', error);
+        alert("Erreur lors de l'envoi. Vérifiez votre connexion.");
     } finally {
         setIsSubmitting(false);
     }
@@ -210,9 +230,15 @@ export const PublicForm: React.FC<PublicFormProps> = ({ settings, onClose, compa
                                             onChange={e => handleContactChange(block.id, 'email', e.target.value)}
                                          />
                                          <input
+                                            type="tel"
+                                            placeholder="Téléphone"
+                                            required={block.required}
+                                            className="col-span-2 w-full bg-white border-slate-200 rounded-lg text-sm p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            onChange={e => handleContactChange(block.id, 'phone', e.target.value)}
+                                         />
+                                         <input
                                             type="text"
                                             placeholder="Adresse complète"
-                                            required={block.required}
                                             className="col-span-2 w-full bg-white border-slate-200 rounded-lg text-sm p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none"
                                             onChange={e => handleContactChange(block.id, 'address', e.target.value)}
                                          />

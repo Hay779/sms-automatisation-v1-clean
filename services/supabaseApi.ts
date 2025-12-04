@@ -382,29 +382,35 @@ export const ApiService = {
   getAllCompaniesStats: async (): Promise<CompanyStats[]> => {
     const supabase = getSupabase();
     
-    const { data: companies } = await supabase
+    const { data: companies, error: compError } = await supabase
       .from('companies')
-      .select('*, settings(*)');
+      .select('*')
+      .order('created_at', { ascending: false });
     
-    if (!companies) return [];
+    if (compError || !companies) {
+      console.error('[GET_STATS] Erreur:', compError);
+      return [];
+    }
 
     const stats: CompanyStats[] = [];
 
     for (const company of companies) {
-      const settings = company.settings[0];
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('sms_credits, use_custom_provider')
+        .eq('company_id', company.id)
+        .single();
       
       const { data: logs } = await supabase
         .from('sms_logs')
         .select('status, created_at')
-        .eq('company_id', company.id);
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false });
 
       const sms_sent = logs?.filter(l => l.status === 'sent').length || 0;
       const calls_filtered = logs?.filter(l => l.status === 'blocked').length || 0;
       const errors = logs?.filter(l => l.status === 'error').length || 0;
-
-      const lastActivity = logs && logs.length > 0 
-        ? logs[0].created_at 
-        : null;
+      const lastActivity = logs && logs.length > 0 ? logs[0].created_at : null;
 
       stats.push({
         company_id: company.id,
@@ -550,14 +556,12 @@ export const ApiService = {
  saveSystemConfig: async (config: SystemConfig) => {
   const supabase = getSupabase();
   
-  // Récupérer config existante
   const { data: existing } = await supabase
     .from('system_config')
     .select('id')
     .single();
   
   if (existing) {
-    // Update
     const { data, error } = await supabase
       .from('system_config')
       .update(config)
@@ -568,7 +572,6 @@ export const ApiService = {
     if (error) throw error;
     return data;
   } else {
-    // Insert
     const { data, error } = await supabase
       .from('system_config')
       .insert([config])
@@ -590,7 +593,7 @@ export const ApiService = {
 
   // ============ FORMULAIRES ============
 
-  submitForm: async (submission: Omit<FormSubmission, 'id' | 'submitted_at'>) => {
+  submitForm: async (submission: Omit<FormSubmission, 'id' | 'created_at'>) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('form_submissions')
@@ -598,17 +601,33 @@ export const ApiService = {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('[SUBMIT_FORM] Erreur:', error);
+      throw error;
+    }
+    
+    console.log('[SUBMIT_FORM] ✅ Soumission créée:', data);
     return data;
   },
 
-  getFormSubmissions: async (companyId: string): Promise<FormSubmission[]> => {
+  getFormSubmissions: async (companyId?: string): Promise<FormSubmission[]> => {
     const supabase = getSupabase();
-    const { data } = await supabase
+    
+    if (!companyId) {
+      console.warn('[GET_FORM_SUBMISSIONS] Aucun companyId fourni');
+      return [];
+    }
+    
+    const { data, error } = await supabase
       .from('form_submissions')
       .select('*')
       .eq('company_id', companyId)
-      .order('submitted_at', { ascending: false });
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('[GET_FORM_SUBMISSIONS] Erreur:', error);
+      return [];
+    }
     
     return data || [];
   },
@@ -623,6 +642,24 @@ export const ApiService = {
       .single();
     
     if (error) throw error;
+    return data;
+  },
+
+  updateSubmissionStatus: async (submissionId: string, status: 'new' | 'pending' | 'done' | 'archived') => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('form_submissions')
+      .update({ status })
+      .eq('id', submissionId)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[UPDATE_STATUS] Erreur:', error);
+      throw error;
+    }
+    
+    console.log(`[UPDATE_STATUS] ✅ Status mis à jour: ${status}`);
     return data;
   },
 
