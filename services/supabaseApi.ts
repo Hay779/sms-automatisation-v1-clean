@@ -547,17 +547,38 @@ export const ApiService = {
       .eq('company_id', companyId);
   },
 
-  saveSystemConfig: async (config: SystemConfig) => {
-    const supabase = getSupabase();
+ saveSystemConfig: async (config: SystemConfig) => {
+  const supabase = getSupabase();
+  
+  // Récupérer config existante
+  const { data: existing } = await supabase
+    .from('system_config')
+    .select('id')
+    .single();
+  
+  if (existing) {
+    // Update
     const { data, error } = await supabase
       .from('system_config')
-      .upsert(config)
+      .update(config)
+      .eq('id', existing.id)
       .select()
       .single();
     
     if (error) throw error;
     return data;
-  },
+  } else {
+    // Insert
+    const { data, error } = await supabase
+      .from('system_config')
+      .insert([config])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+},
 
   resetAllData: async () => {
     const supabase = getSupabase();
