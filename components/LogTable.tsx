@@ -96,7 +96,7 @@ export const LogTable: React.FC<LogTableProps> = ({ logs }) => {
 
   const handleViewDossier = async (phone: string) => {
       // Find latest submission for this phone
-      const submissions = await ApiService.getSubmissions();
+      const submissions = await ApiService.getFormSubmissions();
       const sub = submissions.find(s => s.phone === phone);
       if (sub) {
           setSelectedSubmission(sub);

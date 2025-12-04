@@ -20,7 +20,7 @@ export const FormSubmissions: React.FC<FormSubmissionsProps> = ({ onOpenSimulato
 
   const loadData = async () => {
       setIsLoading(true);
-      const data = await ApiService.getSubmissions();
+      const data = await ApiService.getFormSubmissions();
       setSubmissions(data);
       setIsLoading(false);
   };

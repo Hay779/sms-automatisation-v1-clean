@@ -547,7 +547,7 @@ export const ApiService = {
       }
   },
 
-  getSubmissions: async (): Promise<FormSubmission[]> => {
+  getFormSubmissions: async (): Promise<FormSubmission[]> => {
       await delay(300);
       if (!currentSession?.companyId) return [];
       return db.submissions
