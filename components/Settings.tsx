@@ -1,16 +1,16 @@
-
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsType, BlockType, FormBlock } from '../types';
-import { Save, Zap, Clock, Building2, Shield, Eye, EyeOff, CreditCard, ExternalLink, Smartphone, CalendarClock, Globe, LayoutTemplate, Image, Type, Video, FileText, Siren, Plus, X, Percent, MapPin, GripVertical, ArrowUp, ArrowDown, Trash2, CheckSquare, AlignLeft, Minus, Phone, User, Mail, QrCode, Bell, MessageSquare } from 'lucide-react';
+import { Save, Zap, Clock, Building2, Shield, Eye, EyeOff, CreditCard, ExternalLink, Smartphone, CalendarClock, Globe, LayoutTemplate, Image, Type, Video, FileText, Siren, Plus, X, Percent, MapPin, GripVertical, ArrowUp, ArrowDown, Trash2, CheckSquare, AlignLeft, Minus, Phone, User, Mail, QrCode, Bell, MessageSquare, Upload, Palette } from 'lucide-react';
 
 interface SettingsProps {
   settings: SettingsType;
   onSave: (newSettings: SettingsType) => Promise<void>;
+  companyId?: string;
 }
 
 type TabType = 'general' | 'schedule' | 'form' | 'billing' | 'security';
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onSave, companyId }) => {
   const [formData, setFormData] = useState<SettingsType>(settings);
   const [activeTab, setActiveTab] = useState<TabType>('general');
   const [isSaving, setIsSaving] = useState(false);
@@ -59,6 +59,21 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
               [field]: (prev.web_form as any)[field] + ` ${variable}`
           }
       }));
+  };
+
+  // -- LOGO UPLOAD HANDLER --
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              setFormData(prev => ({
+                  ...prev,
+                  web_form: { ...prev.web_form, logo_url: reader.result as string }
+              }));
+          };
+          reader.readAsDataURL(file);
+      }
   };
 
   // -- HANDLERS SCHEDULE --
@@ -177,16 +192,8 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     setIsSaving(true);
     setMessage(null);
     try {
-      // In a real app, this would merge with existing data, but here we replace state
-      // Ensure we're sending the latest state
       await onSave(formData);
-      // Wait for re-render if needed
       await new Promise(resolve => setTimeout(resolve, 300));
-      // Reload form data from props to ensure sync
-      // Actually, since this is a controlled form by state initialized from props, 
-      // we don't strictly need to reload unless onSave mutates data structure. 
-      // But let's assume onSave propagates up and we keep local state.
-      
       setMessage({ type: 'success', text: 'Paramètres enregistrés avec succès.' });
     } catch (error) {
       setMessage({ type: 'error', text: 'Erreur lors de la sauvegarde.' });
@@ -457,15 +464,30 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                             <ExternalLink className="w-3 h-3 text-slate-400" />
                                         </div>
                                         {showQRCode && (
-                                            <div className="mt-4 flex justify-center p-4 bg-white border border-slate-100 rounded-lg">
-                                                <div className="w-32 h-32 bg-slate-900 flex items-center justify-center text-white text-xs">
-                                                    [QR CODE SIMULÉ]
-                                                </div>
-                                            </div>
-                                        )}
+    <div className="mt-4 flex justify-center p-4 bg-white border border-slate-100 rounded-lg">
+        <canvas 
+            ref={(canvas) => {
+                if (canvas && companyId) {
+                    const formUrl = `${window.location.origin}/form/${companyId}`;
+                    import('qrcode').then(QRCode => {
+                        QRCode.toCanvas(canvas, formUrl, { 
+                            width: 128,
+                            margin: 2,
+                            color: {
+                                dark: '#1e293b',
+                                light: '#ffffff'
+                            }
+                        }).catch(err => console.error('QR Code error:', err));
+                    });
+                }
+            }}
+            className="border border-slate-200 rounded"
+        />
+    </div>
+)}
                                    </div>
 
-                                   {/* 1. NOTIFICATIONS (NEW WITH TEMPLATES) */}
+                                   {/* 1. NOTIFICATIONS */}
                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-4">
                                         <h5 className="font-bold text-sm text-slate-700 flex items-center border-b pb-2">
                                             <Bell className="w-4 h-4 mr-2 text-indigo-600" /> 
@@ -663,15 +685,36 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                         </div>
                                    </div>
 
-                                   {/* 2. BRANDING HEADER */}
+                                   {/* 2. BRANDING HEADER WITH UPLOAD */}
                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-3">
                                         <h5 className="font-bold text-sm text-slate-700 border-b pb-2">2. En-tête & Identité</h5>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="col-span-2">
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">URL Logo</label>
-                                                <input type="text" name="logo_url" value={formData.web_form.logo_url} onChange={handleFormHeaderChange} className="block w-full rounded border-slate-300 text-sm p-2 border" placeholder="https://..." />
+                                        <div className="grid grid-cols-1 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-2">Logo de l'entreprise</label>
+                                                <div className="flex items-center space-x-3">
+                                                    {formData.web_form.logo_url && (
+                                                        <img src={formData.web_form.logo_url} alt="Logo" className="h-16 w-16 object-contain rounded border border-slate-200 bg-white p-1" />
+                                                    )}
+                                                    <div className="flex-1">
+                                                        <label className="cursor-pointer inline-flex items-center px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors">
+                                                            <Upload className="w-3 h-3 mr-2" />
+                                                            {formData.web_form.logo_url ? 'Changer le logo' : 'Importer un logo'}
+                                                            <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                                                        </label>
+                                                        <p className="text-[10px] text-slate-400 mt-1">PNG, JPG ou SVG (max 2 Mo)</p>
+                                                    </div>
+                                                    {formData.web_form.logo_url && (
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => setFormData(prev => ({ ...prev, web_form: { ...prev.web_form, logo_url: '' } }))}
+                                                            className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="col-span-2">
+                                            <div>
                                                 <label className="block text-xs font-medium text-slate-600 mb-1">Titre Page</label>
                                                 <input type="text" name="page_title" value={formData.web_form.page_title} onChange={handleFormHeaderChange} className="block w-full rounded border-slate-300 text-sm p-2 border" />
                                             </div>
@@ -758,19 +801,67 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                        </div>
                                    </div>
 
-                                   {/* 4. FOOTER & MARKETING */}
-                                   <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-3">
-                                       <h5 className="font-bold text-sm text-slate-700 border-b pb-2">4. Pied de page & Options</h5>
+                                   {/* 4. FOOTER & STYLING */}
+                                   <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm space-y-4">
+                                       <h5 className="font-bold text-sm text-slate-700 border-b pb-2 flex items-center">
+                                           <Palette className="w-4 h-4 mr-2 text-indigo-600" />
+                                           4. Pied de page & Options
+                                       </h5>
+                                       
+                                       {/* Footer Content */}
                                        <div className="grid grid-cols-2 gap-3">
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">Adresse (Footer)</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">Adresse</label>
                                                 <input type="text" name="company_address" value={formData.web_form.company_address} onChange={handleFormHeaderChange} className="block w-full rounded border-slate-300 text-sm p-2 border" placeholder="12 rue..." />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">Téléphone (Footer)</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">Téléphone</label>
                                                 <input type="text" name="company_phone" value={formData.web_form.company_phone} onChange={handleFormHeaderChange} className="block w-full rounded border-slate-300 text-sm p-2 border" placeholder="01..." />
                                             </div>
                                        </div>
+
+                                       {/* Footer Styling */}
+                                       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
+                                           <h6 className="text-xs font-bold text-slate-600 flex items-center">
+                                               <Palette className="w-3 h-3 mr-1" />
+                                               Personnalisation du pied de page
+                                           </h6>
+                                           <div className="grid grid-cols-2 gap-3">
+                                               <div>
+                                                   <label className="block text-[10px] font-medium text-slate-500 mb-1">Couleur de fond</label>
+                                                   <input 
+                                                       type="color" 
+                                                       name="footer_bg_color" 
+                                                       value={(formData.web_form as any).footer_bg_color || '#f1f5f9'} 
+                                                       onChange={handleFormHeaderChange}
+                                                       className="h-8 w-full rounded border-slate-300 cursor-pointer"
+                                                   />
+                                               </div>
+                                               <div>
+                                                   <label className="block text-[10px] font-medium text-slate-500 mb-1">Couleur du texte</label>
+                                                   <input 
+                                                       type="color" 
+                                                       name="footer_text_color" 
+                                                       value={(formData.web_form as any).footer_text_color || '#64748b'} 
+                                                       onChange={handleFormHeaderChange}
+                                                       className="h-8 w-full rounded border-slate-300 cursor-pointer"
+                                                   />
+                                               </div>
+                                           </div>
+                                           <div>
+                                               <label className="block text-[10px] font-medium text-slate-500 mb-1">Texte personnalisé (optionnel)</label>
+                                               <input 
+                                                   type="text" 
+                                                   name="footer_custom_text" 
+                                                   value={(formData.web_form as any).footer_custom_text || ''} 
+                                                   onChange={handleFormHeaderChange}
+                                                   placeholder="Ex: © 2025 - Tous droits réservés"
+                                                   className="block w-full rounded border-slate-300 text-xs p-2 border"
+                                               />
+                                           </div>
+                                       </div>
+
+                                       {/* Marketing Opt-in */}
                                         <div className="pt-2">
                                             <label className="flex items-center space-x-3 text-sm text-slate-700 cursor-pointer p-2 hover:bg-slate-50 rounded border border-transparent hover:border-slate-200">
                                                <input type="checkbox" name="enable_marketing" checked={formData.web_form.enable_marketing} onChange={handleMarketingToggle} className="text-indigo-600 rounded h-4 w-4" />
@@ -831,7 +922,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                                         )}
 
                                                         {block.type === 'separator' && (
-                                                            <hr className="border-slate-200 my-4" />
+                                                            <hr className="border-slate-400 my-4 border-2" />
                                                         )}
 
                                                         {block.type === 'text' && (
@@ -894,6 +985,7 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                                                     <div className="bg-white border border-slate-200 h-7 rounded px-2 flex items-center text-[10px] text-slate-300">Nom</div>
                                                                     <div className="bg-white border border-slate-200 h-7 rounded px-2 flex items-center text-[10px] text-slate-300">Prénom</div>
                                                                     <div className="col-span-2 bg-white border border-slate-200 h-7 rounded px-2 flex items-center text-[10px] text-slate-300">Email</div>
+                                                                    <div className="col-span-2 bg-white border border-slate-200 h-7 rounded px-2 flex items-center text-[10px] text-slate-300">Téléphone</div>
                                                                     <div className="col-span-2 bg-white border border-slate-200 h-7 rounded px-2 flex items-center text-[10px] text-slate-300">Adresse</div>
                                                                 </div>
                                                             </div>
@@ -914,22 +1006,33 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                                                 <button type="button" className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold text-xs shadow-lg mt-4 mb-8">Envoyer ma demande</button>
                                             </div>
 
-                                            {/* Footer */}
-                                            <div className="bg-slate-100 p-4 text-center border-t border-slate-200">
-                                                <p className="text-[10px] font-bold text-slate-600">{formData.company_name}</p>
+                                            {/* Footer with Custom Styling */}
+                                            <div 
+                                                className="p-4 text-center border-t border-slate-200"
+                                                style={{ 
+                                                    backgroundColor: (formData.web_form as any).footer_bg_color || '#f1f5f9',
+                                                    color: (formData.web_form as any).footer_text_color || '#64748b'
+                                                }}
+                                            >
+                                                <p className="text-[10px] font-bold">{formData.company_name}</p>
                                                 {formData.web_form.company_address && (
-                                                    <p className="text-[9px] text-slate-500 mt-1 flex items-center justify-center">
+                                                    <p className="text-[9px] mt-1 flex items-center justify-center">
                                                         <MapPin className="w-2 h-2 mr-1" />
                                                         {formData.web_form.company_address}
                                                     </p>
                                                 )}
                                                 {formData.web_form.company_phone && (
-                                                    <p className="text-[9px] text-slate-500 mt-1 flex items-center justify-center">
+                                                    <p className="text-[9px] mt-1 flex items-center justify-center">
                                                         <Phone className="w-2 h-2 mr-1" />
                                                         {formData.web_form.company_phone}
                                                     </p>
                                                 )}
-                                                <p className="text-[8px] text-slate-400 mt-2">Powered by SMS Manager</p>
+                                                {(formData.web_form as any).footer_custom_text && (
+                                                    <p className="text-[8px] mt-2 opacity-80">
+                                                        {(formData.web_form as any).footer_custom_text}
+                                                    </p>
+                                                )}
+                                                <p className="text-[8px] mt-2 opacity-60">Powered by SMS Manager</p>
                                             </div>
                                        </div>
                                    </div>

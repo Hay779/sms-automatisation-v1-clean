@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -9,7 +8,6 @@ import { SuperAdminDashboard } from './components/SuperAdminDashboard';
 import { PublicForm } from './components/PublicForm';
 import { FormSubmissions } from './components/FormSubmissions';
 import { LandingPage } from './components/LandingPage';
-// Using secure enhanced API service
 import { ApiService } from './services/supabaseApi';
 import { Settings, SmsLog, DashboardStats, UserRole } from './types';
 import { Loader2 } from 'lucide-react';
@@ -19,25 +17,18 @@ const AUTH_ROLE_KEY = 'auth_role';
 const COMPANY_ID_KEY = 'auth_company_id';
 
 const App: React.FC = () => {
-  // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('CLIENT');
   const [isImpersonating, setIsImpersonating] = useState(false);
-  
-  // App state
   const [currentView, setCurrentView] = useState<'dashboard' | 'settings' | 'form_submissions'>('dashboard');
   const [isPublicFormMode, setIsPublicFormMode] = useState(false);
-  
-  // Navigation State
+  const [publicFormCompanyId, setPublicFormCompanyId] = useState<string | null>(null);
   const [viewState, setViewState] = useState<'landing' | 'login' | 'register' | 'app'>('landing');
-
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [logs, setLogs] = useState<SmsLog[]>([]);
   const [stats, setStats] = useState<DashboardStats>({ sms_sent: 0, calls_filtered: 0, errors: 0 });
   const [currentCompanyId, setCurrentCompanyId] = useState<string>('');
-
-  // Tutorial State
   const [showTutorial, setShowTutorial] = useState(false);
 
   const fetchData = async (compId: string) => {
@@ -58,6 +49,18 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    // CHECK IF PUBLIC FORM URL: /form/:companyId
+    const path = window.location.pathname;
+    const formMatch = path.match(/^\/form\/([a-zA-Z0-9-]+)$/);
+    
+    if (formMatch) {
+      const companyId = formMatch[1];
+      setPublicFormCompanyId(companyId);
+      setIsPublicFormMode(true);
+      fetchData(companyId);
+      return;
+    }
+    
     // Check auth on load
     const storedAuth = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
     const storedRole = localStorage.getItem(AUTH_ROLE_KEY) || sessionStorage.getItem(AUTH_ROLE_KEY);
@@ -107,10 +110,8 @@ const App: React.FC = () => {
     setViewState('landing');
   };
 
-  // SUPER ADMIN ACTIONS
   const handleImpersonate = async (companyId: string) => {
     setIsLoading(true);
-    // In production, ApiService is stateless, we just switch context ID locally
     setCurrentCompanyId(companyId);
     setIsImpersonating(true);
     await fetchData(companyId);
@@ -123,7 +124,6 @@ const App: React.FC = () => {
     setIsLoading(false);
   };
 
-  // CLIENT ACTIONS
   const handleSaveSettings = async (newSettings: Settings) => {
     if (!currentCompanyId) return;
     const updated = await ApiService.updateSettings(currentCompanyId, newSettings);
@@ -133,7 +133,7 @@ const App: React.FC = () => {
   const handleToggleStatus = async () => {
     if (!settings) return;
     const newSettings = { ...settings, auto_sms_enabled: !settings.auto_sms_enabled };
-    const updated = await ApiService.updateSettings(newSettings);
+    const updated = await ApiService.updateSettings(currentCompanyId, newSettings);
     setSettings(updated);
   };
 
@@ -141,7 +141,6 @@ const App: React.FC = () => {
     alert("En mode Production, la simulation se fait via l'URL Webhook (voir onglet Système).");
   };
 
-  // RENDER LOADING
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -153,18 +152,23 @@ const App: React.FC = () => {
     );
   }
 
-  // PUBLIC FORM VIEW (SIMULATOR)
+  // PUBLIC FORM VIEW (accessible sans auth)
   if (isPublicFormMode && settings) {
       return (
           <PublicForm 
             settings={settings} 
-            companyId={currentCompanyId} 
-            onClose={() => setIsPublicFormMode(false)} 
+            companyId={publicFormCompanyId || currentCompanyId} 
+            onClose={() => {
+              if (publicFormCompanyId) {
+                window.location.href = '/';
+              } else {
+                setIsPublicFormMode(false);
+              }
+            }} 
           />
       );
   }
 
-  // NAVIGATION FLOW
   if (!isAuthenticated) {
       switch (viewState) {
           case 'login':
@@ -177,8 +181,6 @@ const App: React.FC = () => {
       }
   }
 
-  // APP LOGIC (Authenticated)
-  
   if (userRole === 'SUPER_ADMIN' && !isImpersonating) {
     return <SuperAdminDashboard onImpersonate={handleImpersonate} onLogout={handleLogout} />;
   }
@@ -203,24 +205,28 @@ const App: React.FC = () => {
       }
 
       switch (currentView) {
-          case 'dashboard':
-              return (
-                <Dashboard 
-                    stats={stats} 
-                    logs={logs} 
-                    settings={settings} 
-                    onToggleStatus={handleToggleStatus} 
-                    onSimulateCall={handleSimulateCall}
-                    showTutorial={showTutorial}
-                />
-              );
-          case 'settings':
-              return <SettingsView settings={settings} onSave={handleSaveSettings} />;
-          case 'form_submissions':
-              return <FormSubmissions onOpenSimulator={() => setIsPublicFormMode(true)} />;
-          default:
-              return null;
-      }
+    case 'dashboard':
+        return (
+          <Dashboard 
+              stats={stats} 
+              logs={logs} 
+              settings={settings} 
+              onToggleStatus={handleToggleStatus} 
+              onSimulateCall={handleSimulateCall}
+              showTutorial={showTutorial}
+          />
+        );
+    case 'settings':
+        return <SettingsView 
+          settings={settings} 
+          onSave={handleSaveSettings} 
+          companyId={currentCompanyId} 
+        />;
+    case 'form_submissions':
+        return <FormSubmissions onOpenSimulator={() => setIsPublicFormMode(true)} />;
+    default:
+        return null;
+}
   };
 
   return (

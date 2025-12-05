@@ -72,6 +72,10 @@ export interface WebFormConfig {
 
   notify_client_sms: boolean;   // Send confirmation SMS to client
   client_sms_message?: string;  // Template SMS
+
+  footer_bg_color?: string;
+  footer_text_color?: string;
+  footer_custom_text?: string;
 }
 
 export interface FormSubmission {
